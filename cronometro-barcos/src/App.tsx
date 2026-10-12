@@ -156,33 +156,40 @@ function exportText(filename: string, content: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+
 function formatEvents(events: RaceEvent[]): string {
-  if (events.length === 0) return "  Nenhum registro.";
+  if (events.length === 0) {
+    return "    Nenhum registro.";
+  }
 
   return events
     .map((event) => {
       if (event.type === "VOLTA") {
-        return (
-          `  Volta ${event.lap}: ${formatTime(event.elapsed)}` +
-          ` | Tempo da volta: ${formatTime(event.lapTime ?? 0)}` +
-          ` | Registro: ${event.recordedAt}`
-        );
+        return [
+          `    Volta ${event.lap}`,
+          `      Tempo total: ${formatTime(event.elapsed)}`,
+          `      Tempo da volta: ${formatTime(event.lapTime ?? 0)}`,
+          `      Registrado em: ${event.recordedAt}`,
+        ].join("\n");
       }
 
       if (event.type === "PONTO") {
-        return (
-          `  ${event.pointName}: ${formatTime(event.elapsed)}` +
-          ` | Registro: ${event.recordedAt}`
-        );
+        return [
+          `    ${event.pointName}`,
+          `      Tempo total: ${formatTime(event.elapsed)}`,
+          `      Registrado em: ${event.recordedAt}`,
+        ].join("\n");
       }
 
-      return (
-        `  Finalização: ${formatTime(event.elapsed)}` +
-        ` | Registro: ${event.recordedAt}`
-      );
+      return [
+        "    Finalização",
+        `      Tempo total: ${formatTime(event.elapsed)}`,
+        `      Registrado em: ${event.recordedAt}`,
+      ].join("\n");
     })
-    .join("\n");
+    .join("\n\n");
 }
+
 
 function App() {
   const [tab, setTab] = useState<Tab>("competition");
@@ -512,57 +519,64 @@ function App() {
     setIndividual(createIndividual());
   }
 
+
   function exportRace(race: Race) {
     const duration = elapsedAt(race.startedAt, race.finishedAt, now);
 
+    const situation =
+      race.finishedAt !== null
+        ? "Encerrada"
+        : race.startedAt !== null
+          ? "Em andamento"
+          : "Não iniciada";
+
     const lines = [
-      "SISTEMA DE CRONOMETRAGEM - COMPETIÇÃO DE BARCOS",
-      `Prova: ${race.name}`,
+      "RELATÓRIO DE COMPETIÇÃO",
+      "",
+      "DADOS DA PROVA",
+      `Nome: ${race.name}`,
       `Criada em: ${race.createdAt}`,
       `Início: ${race.startedWallTime ?? "Não iniciada"}`,
-      `Situação: ${
-        race.finishedAt !== null
-          ? "Encerrada"
-          : race.startedAt !== null
-            ? "Em andamento"
-            : "Não iniciada"
-      }`,
+      `Situação: ${situation}`,
+      "",
+      "RESUMO",
       `Tempo geral: ${formatTime(duration)}`,
       "",
-      "========================================",
       "RESULTADOS DOS COMPETIDORES",
-      "========================================",
       "",
     ];
 
-    race.competitors.forEach((competitor) => {
+    race.competitors.forEach((competitor, index) => {
       const elapsed =
         competitor.finishedAt ??
         elapsedAt(race.startedAt, race.finishedAt, now);
 
+      const competitorSituation =
+        competitor.finishedAt !== null
+          ? "Finalizado"
+          : race.finishedAt !== null
+            ? "Prova encerrada"
+            : race.startedAt !== null
+              ? "Em andamento"
+              : "Aguardando início";
+
       lines.push(
-        `Equipe: ${competitor.name}`,
-        `Número: ${competitor.number}`,
-        `Situação: ${
-          competitor.finishedAt !== null
-            ? "Finalizado"
-            : race.finishedAt !== null
-              ? "Prova encerrada"
-              : race.startedAt !== null
-                ? "Em andamento"
-                : "Aguardando início"
-        }`,
-        `Tempo total: ${formatTime(elapsed)}`,
-        "Registros:",
+        `${String(index + 1).padStart(2, "0")}. ${competitor.name}`,
+        `    Número: ${competitor.number}`,
+        `    Situação: ${competitorSituation}`,
+        `    Tempo total: ${formatTime(elapsed)}`,
+        "",
+        "    REGISTROS",
         formatEvents(competitor.events),
         "",
-        "----------------------------------------",
         "",
       );
     });
 
     exportText(`${safeFilename(race.name)}.txt`, lines.join("\n"));
   }
+
+
 
   function exportIndividual() {
     const duration = elapsedAt(
@@ -571,21 +585,26 @@ function App() {
       now,
     );
 
+    const situation =
+      individual.finishedAt !== null
+        ? "Encerrado"
+        : individual.startedAt !== null
+          ? "Em andamento"
+          : "Não iniciado";
+
     const content = [
-      "SISTEMA DE CRONOMETRAGEM - CRONÔMETRO INDIVIDUAL",
+      "RELATÓRIO INDIVIDUAL",
+      "",
+      "DADOS DA SESSÃO",
       `Equipe: ${individual.name}`,
       `Início: ${individual.startedWallTime ?? "Não iniciado"}`,
-      `Situação: ${
-        individual.finishedAt !== null
-          ? "Encerrado"
-          : individual.startedAt !== null
-            ? "Em andamento"
-            : "Não iniciado"
-      }`,
+      `Situação: ${situation}`,
+      "",
+      "RESUMO",
       `Tempo total: ${formatTime(duration)}`,
       "",
       "REGISTROS",
-      "========================================",
+      "",
       formatEvents(individual.events),
       "",
     ].join("\n");
@@ -595,6 +614,7 @@ function App() {
       content,
     );
   }
+
 
   const css = `
     * { box-sizing: border-box; }
