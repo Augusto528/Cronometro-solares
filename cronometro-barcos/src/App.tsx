@@ -192,7 +192,7 @@ function App() {
   const [selectedRaceId, setSelectedRaceId] = useState("");
 
   const [raceName, setRaceName] = useState("");
-  const [pointNames, setPointNames] = useState("Boia");
+  const [pointNames] = useState("Boia");
 
   const [individualTeam, setIndividualTeam] = useState(TEAMS[0]);
   const [individual, setIndividual] =
