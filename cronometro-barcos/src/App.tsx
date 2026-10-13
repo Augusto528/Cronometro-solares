@@ -16,18 +16,18 @@ type EventType = "VOLTA" | "PONTO" | "FINALIZACAO";
 type Tab = "competition" | "individual";
 
 const TEAMS = [
-  "Arariboia",
-  "Fernando Amorim",
-  "Günes",
-  "Hefesto",
-  "Hurakan",
-  "Leviatan",
   "Reis do Sol",
-  "Sete Capitães",
-  "Solares",
-  "Solaris",
-  "Solmar Celeris",
+  "Leviatan",
   "Zenite",
+  "Günes",
+  "Solmar Celeris",
+  "Hurakan",
+  "Sete Capitães",
+  "Fernando Amorim",
+  "Solaris",
+  "Hefesto",
+  "Solares",
+  "Arariboia",
 ];
 
 interface RaceEvent {
