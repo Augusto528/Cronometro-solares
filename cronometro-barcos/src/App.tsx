@@ -1,5 +1,16 @@
-
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useRoom } from "./lib/RoomContext";
+import {
+  carregarProvas,
+  criarProva,
+  iniciarProva,
+  registrarVolta,
+  registrarPonto,
+  finalizarEquipe,
+  encerrarProva,
+  excluirProva,
+  observarProvas,
+} from "./lib/races";
 
 type EventType = "VOLTA" | "PONTO" | "FINALIZACAO";
 type Tab = "competition" | "individual";
@@ -95,30 +106,6 @@ function createEvent(
   };
 }
 
-function createCompetitor(name: string, number: string): Competitor {
-  return {
-    id: crypto.randomUUID(),
-    name,
-    number,
-    events: [],
-    finishedAt: null,
-  };
-}
-
-function createRace(name: string): Race {
-  return {
-    id: crypto.randomUUID(),
-    name,
-    createdAt: new Date().toLocaleString("pt-BR"),
-    startedAt: null,
-    startedWallTime: null,
-    finishedAt: null,
-    competitors: TEAMS.map((team, index) =>
-      createCompetitor(team, String(index + 1)),
-    ),
-  };
-}
-
 function createIndividual(): IndividualSession {
   return {
     name: "Cronômetro individual",
@@ -193,8 +180,14 @@ function formatEvents(events: RaceEvent[]): string {
 
 function App() {
   const [tab, setTab] = useState<Tab>("competition");
-  const [now, setNow] = useState(clock());
+  const room = useRoom();
+  const roomId = room.id;
 
+  const [now, setNow] = useState(Date.now());
+  const [individualNow, setIndividualNow] = useState(clock());
+  const [loadingRaces, setLoadingRaces] = useState(true);
+  const [raceError, setRaceError] = useState("");
+  const [operationLoading, setOperationLoading] = useState(false);
   const [races, setRaces] = useState<Race[]>([]);
   const [selectedRaceId, setSelectedRaceId] = useState("");
 
@@ -202,11 +195,59 @@ function App() {
   const [pointNames] = useState("Boia");
 
   const [individualTeam, setIndividualTeam] = useState(TEAMS[0]);
-  const [individual, setIndividual] =
-    useState<IndividualSession>(createIndividual);
+  const [individual, setIndividual] = useState<IndividualSession>(createIndividual);
+
+
+
+
+
+  const reloadRaces = useCallback(async () => {
+    try {
+      setRaceError("");
+
+      const loadedRaces = await carregarProvas(roomId);
+
+      setRaces(loadedRaces);
+
+      setSelectedRaceId((currentId) => {
+        if (currentId && loadedRaces.some((race) => race.id === currentId)) {
+          return currentId;
+        }
+
+        return loadedRaces[0]?.id ?? "";
+      });
+    } catch (error) {
+      setRaceError(
+        error instanceof Error
+          ? error.message
+          : "Não foi possível carregar as provas.",
+      );
+      } finally {
+        setLoadingRaces(false);
+      }
+  }, [roomId]); 
 
   useEffect(() => {
-    const timer = window.setInterval(() => setNow(clock()), 30);
+    void reloadRaces();
+
+    const unsubscribe = observarProvas(roomId, () => {
+      void reloadRaces();
+    });
+
+    return unsubscribe;
+  }, [roomId, reloadRaces]);
+
+
+
+
+  
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setNow(Date.now());
+      setIndividualNow(clock());
+    }, 30);
+
     return () => window.clearInterval(timer);
   }, []);
 
@@ -225,36 +266,10 @@ function App() {
   const individualElapsed = elapsedAt(
     individual.startedAt,
     individual.finishedAt,
-    now,
+    individualNow,
   );
 
-  function updateRace(
-    raceId: string,
-    updater: (race: Race) => Race,
-  ) {
-    setRaces((current) =>
-      current.map((race) =>
-        race.id === raceId ? updater(race) : race,
-      ),
-    );
-  }
-
-  function updateCompetitor(
-    raceId: string,
-    competitorId: string,
-    updater: (competitor: Competitor) => Competitor,
-  ) {
-    updateRace(raceId, (race) => ({
-      ...race,
-      competitors: race.competitors.map((competitor) =>
-        competitor.id === competitorId
-          ? updater(competitor)
-          : competitor,
-      ),
-    }));
-  }
-
-  function addRace() {
+  async function addRace() {
     const name = raceName.trim();
 
     if (!name) {
@@ -262,13 +277,28 @@ function App() {
       return;
     }
 
-    const race = createRace(name);
-    setRaces((current) => [...current, race]);
-    setSelectedRaceId(race.id);
-    setRaceName("");
+    if (operationLoading) return;
+
+    setOperationLoading(true);
+    setRaceError("");
+
+    try {
+      const raceId = await criarProva(roomId, name, TEAMS);
+      setRaceName("");
+      await reloadRaces();
+      setSelectedRaceId(raceId);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Erro ao criar prova.";
+
+      setRaceError(message);
+      window.alert(message);
+    } finally {
+      setOperationLoading(false);
+    }
   }
 
-  function deleteRace(raceId: string) {
+  async function deleteRace(raceId: string) {
     const race = races.find((item) => item.id === raceId);
     if (!race) return;
 
@@ -280,15 +310,32 @@ function App() {
       return;
     }
 
-    setRaces((current) => current.filter((item) => item.id !== raceId));
+    if (operationLoading) return;
 
-    if (selectedRaceId === raceId) {
-      setSelectedRaceId("");
+    setOperationLoading(true);
+    setRaceError("");
+
+    try {
+      await excluirProva(raceId);
+
+      if (selectedRaceId === raceId) {
+        setSelectedRaceId("");
+      }
+
+      await reloadRaces();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Erro ao excluir prova.";
+
+      setRaceError(message);
+      window.alert(message);
+    } finally {
+      setOperationLoading(false);
     }
   }
 
-  function startRace() {
-    if (!selectedRace) return;
+  async function startRace() {
+    if (!selectedRace || operationLoading) return;
 
     if (selectedRace.competitors.length === 0) {
       window.alert("Não há equipes cadastradas nesta prova.");
@@ -302,77 +349,88 @@ function App() {
       return;
     }
 
-    updateRace(selectedRace.id, (race) => ({
-      ...race,
-      startedAt: clock(),
-      startedWallTime: new Date().toLocaleString("pt-BR"),
-    }));
+    setOperationLoading(true);
+    setRaceError("");
+
+    try {
+      await iniciarProva(selectedRace.id);
+      await reloadRaces();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Erro ao iniciar prova.";
+
+      setRaceError(message);
+      window.alert(message);
+    } finally {
+      setOperationLoading(false);
+    }
   }
 
-  function finishRace() {
-    if (!selectedRace || !raceRunning) return;
+
+  async function finishRace() {
+    if (!selectedRace || !raceRunning || operationLoading) return;
 
     if (!window.confirm("Deseja encerrar toda a prova?")) return;
 
-    const instant = clock();
+    setOperationLoading(true);
+    setRaceError("");
 
-    updateRace(selectedRace.id, (race) => ({
-      ...race,
-      finishedAt: instant,
-      competitors: race.competitors.map((competitor) => {
-        if (competitor.finishedAt !== null) return competitor;
+    try {
+      // O backend verifica a permissão e realiza
+      // todas as alterações em uma única operação.
+      await encerrarProva(selectedRace.id);
 
-        const elapsed = elapsedAt(race.startedAt, instant, instant);
+      await reloadRaces();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Erro ao encerrar prova.";
 
-        return {
-          ...competitor,
-          finishedAt: elapsed,
-          events: [
-            ...competitor.events,
-            createEvent("FINALIZACAO", elapsed),
-          ],
-        };
-      }),
-    }));
+      setRaceError(message);
+      window.alert(message);
+
+      // Atualiza a interface com o estado real do banco.
+      await reloadRaces();
+    } finally {
+      setOperationLoading(false);
+    }
   }
 
-  function registerLap(race: Race, competitor: Competitor) {
+
+  async function registerLap(race: Race, competitor: Competitor) {
     if (
       race.startedAt === null ||
       race.finishedAt !== null ||
-      competitor.finishedAt !== null
+      competitor.finishedAt !== null ||
+      operationLoading
     ) {
       return;
     }
 
-    const elapsed = elapsedAt(race.startedAt, null, clock());
+    setOperationLoading(true);
+    setRaceError("");
 
-    const previousLap =
-      [...competitor.events]
-        .reverse()
-        .find((event) => event.type === "VOLTA")?.elapsed ?? 0;
+    try {
+      await registrarVolta(race.id, competitor.id);
+      await reloadRaces();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Erro ao registrar volta.";
 
-    const lap =
-      competitor.events.filter((event) => event.type === "VOLTA").length +
-      1;
-
-    updateCompetitor(race.id, competitor.id, (current) => ({
-      ...current,
-      events: [
-        ...current.events,
-        createEvent("VOLTA", elapsed, {
-          lap,
-          lapTime: elapsed - previousLap,
-        }),
-      ],
-    }));
+      setRaceError(message);
+      window.alert(message);
+    } finally {
+      setOperationLoading(false);
+    }
   }
 
-  function registerPoint(race: Race, competitor: Competitor) {
+  async function registerPoint(race: Race, competitor: Competitor) {
     if (
       race.startedAt === null ||
       race.finishedAt !== null ||
-      competitor.finishedAt !== null
+      competitor.finishedAt !== null ||
+      operationLoading
     ) {
       return;
     }
@@ -384,42 +442,56 @@ function App() {
       return;
     }
 
-    const elapsed = elapsedAt(race.startedAt, null, clock());
+    setOperationLoading(true);
+    setRaceError("");
 
-    const count =
-      competitor.events.filter((event) => event.type === "PONTO").length +
-      1;
+    try {
+      const count =
+        competitor.events.filter((event) => event.type === "PONTO").length + 1;
 
-    updateCompetitor(race.id, competitor.id, (current) => ({
-      ...current,
-      events: [
-        ...current.events,
-        createEvent("PONTO", elapsed, {
-          pointName: `${label} ${count}`,
-        }),
-      ],
-    }));
+      await registrarPonto(
+        race.id,
+        competitor.id,
+        `${label} ${count}`,
+      );
+
+      await reloadRaces();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Erro ao registrar ponto.";
+
+      setRaceError(message);
+      window.alert(message);
+    } finally {
+      setOperationLoading(false);
+    }
   }
 
-  function finishCompetitor(race: Race, competitor: Competitor) {
+  async function finishCompetitor(race: Race, competitor: Competitor) {
     if (
       race.startedAt === null ||
       race.finishedAt !== null ||
-      competitor.finishedAt !== null
+      competitor.finishedAt !== null ||
+      operationLoading
     ) {
       return;
     }
 
-    const elapsed = elapsedAt(race.startedAt, null, clock());
+    setOperationLoading(true);
+    setRaceError("");
 
-    updateCompetitor(race.id, competitor.id, (current) => ({
-      ...current,
-      finishedAt: elapsed,
-      events: [
-        ...current.events,
-        createEvent("FINALIZACAO", elapsed),
-      ],
-    }));
+    try {
+      await finalizarEquipe(race.id, competitor.id);
+      await reloadRaces();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Erro ao finalizar equipe.";
+
+      setRaceError(message);
+      window.alert(message);
+    } finally {
+      setOperationLoading(false);
+    }
   }
 
   function startIndividual() {
@@ -820,7 +892,9 @@ function App() {
             <p>Sistema de cronometragem náutica</p>
           </div>
         </div>
-        <div className="status">● Cronometragem local</div>
+        <div className="status">
+          ● {loadingRaces ? "Carregando provas..." : "Sincronizado com a sala"}
+        </div>
       </header>
 
       <nav className="tabs">
@@ -837,6 +911,16 @@ function App() {
           02 · Cronômetro individual
         </button>
       </nav>
+
+      {raceError && (
+        <div
+          className="page"
+          role="alert"
+          style={{ color: "#ffbdc6", overflowWrap: "anywhere" }}
+        >
+          {raceError}
+        </div>
+      )}
 
       {tab === "competition" && (
         <main className="page">
@@ -871,7 +955,11 @@ function App() {
                 }}
                 placeholder="Nome da nova prova"
               />
-              <button className="btn primary" onClick={addRace}>
+              <button
+                className="btn primary"
+                onClick={addRace}
+                disabled={operationLoading || loadingRaces}
+              >
                 + Criar prova
               </button>
             </div>
@@ -916,17 +1004,14 @@ function App() {
                 <div className="button-row centered">
                   <button
                     className="btn success"
-                    disabled={
-                      selectedRace.startedAt !== null ||
-                      selectedRace.finishedAt !== null
-                    }
+                    disabled={operationLoading}
                     onClick={startRace}
                   >
                     ▶ Iniciar prova
                   </button>
                   <button
                     className="btn danger"
-                    disabled={!raceRunning}
+                    disabled={operationLoading}
                     onClick={finishRace}
                   >
                     ■ Encerrar prova
@@ -940,6 +1025,7 @@ function App() {
                   <button
                     className="btn ghost"
                     onClick={() => deleteRace(selectedRace.id)}
+                    disabled={operationLoading}
                   >
                     Excluir prova
                   </button>
@@ -1011,10 +1097,7 @@ function App() {
                         <div className="competitor-actions">
                           <button
                             className="btn small primary"
-                            disabled={
-                              !raceRunning ||
-                              competitor.finishedAt !== null
-                            }
+                            disabled={operationLoading}
                             onClick={() =>
                               registerLap(selectedRace, competitor)
                             }
@@ -1023,10 +1106,7 @@ function App() {
                           </button>
                           <button
                             className="btn small secondary"
-                            disabled={
-                              !raceRunning ||
-                              competitor.finishedAt !== null
-                            }
+                            disabled={operationLoading}
                             onClick={() =>
                               registerPoint(selectedRace, competitor)
                             }
@@ -1035,10 +1115,7 @@ function App() {
                           </button>
                           <button
                             className="btn small danger"
-                            disabled={
-                              !raceRunning ||
-                              competitor.finishedAt !== null
-                            }
+                            disabled={operationLoading}
                             onClick={() =>
                               finishCompetitor(selectedRace, competitor)
                             }
