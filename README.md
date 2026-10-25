@@ -2,8 +2,6 @@
 
 A web application for recording race times and tracking events in solar boat competitions.
 
-**Live application:** https://cronometro-smoky-nine.vercel.app/
-
 ## Overview
 
 The project provides a digital timing interface designed around the needs of solar boat events. It supports competition and individual timing workflows, records race events, and allows timing data to be exported as a text file.
